@@ -11,7 +11,7 @@ warning_log = _app_log.warning
 error_log = _app_log.error
 
 
-def init_log(log_path, log_level):
+def init_log(log_path='/var/log/CliffBase/log.log', log_level='DEBUG'):
     file_handler = RotatingFileHandler(log_path,
                                        mode='w', maxBytes=1024 * 1024 * 100,
                                        backupCount=10,

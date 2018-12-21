@@ -1,0 +1,88 @@
+<html>
+<head>
+    <title></title>
+    <meta charset="utf-8">
+</head>
+<body>
+<form action="login" method="post" name="loginForm">
+    <table width="403">
+        <tr>
+            <td>&nbsp;</td>
+            <td></td>
+        </tr>
+        <tr>
+            <td width="89" align="center">
+                姓名:
+            </td>
+            <td width="247" align="left">
+                <input type="TEXT" name="name"/>
+        </tr>
+        <tr>
+            <td align="center">
+                性别:
+            </td>
+            <td align="left">
+                <input type="RADIO" name="male" value="male" CHECKED>
+                男
+                <input type="RADIO" name="male" value="female">
+                女
+            </td>
+        </tr>
+        <tr>
+            <td align="center">
+                省份:
+            </td>
+            <td align="left">
+                <select name="shengfen">
+                    <option value="山东">
+                        山东
+                    </option>
+                    <option value="山西">
+                        山西
+                    </option>
+                    <option value="河南">
+                        河南
+                    </option>
+                    <option value="河北">
+                        河北
+                    </option>
+                </select>
+            </td>
+        </tr>
+        <tr>
+            <td align="center">
+                学习课程:
+            </td>
+            <td align="left">
+                <input type="CHECKBOX" name="internation" value="人工智能"/>
+                人工智能
+                <input type="CHECKBOX" name="internation" value="数据挖掘"/>
+                数据挖掘<br>
+                <input type="CHECKBOX" name="internation" value="网络爬虫"/>
+                网络爬虫
+                <input type="CHECKBOX" name="interbation" value="后端开发"/>
+                后端开发
+            </td>
+        </tr>
+        <tr>
+            <td align="center">
+                附注信息:
+            </td>
+            <td align="left">
+                            <textarea name="textarea"
+                                      onfocus="if (value =='提交数据'){value =''}"
+                                      onblur="if (value ==''){value='提交数据'}">提交数据</textarea>
+            </td>
+        </tr>
+        <tr>
+            <td></td>
+            <td>
+                <input name="SUBMIT" type="SUBMIT">
+                <input name="RESET" type="RESET">
+            </td>
+        </tr>
+    </table>
+</form>
+
+</body>
+</html>

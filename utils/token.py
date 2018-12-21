@@ -9,24 +9,26 @@ class CToken:
     def __init__(self):
         self.m_token_key = 'zzcontinent@163.com'
         self.m_token_algorithm = 'HS256'
+        self.m_expire = 60 * 60 * 12
+        self.m_token = ''
+
+    def enc(self, payload):
+        return jwt.encode(payload=payload, key=self.m_token_key, algorithm=self.m_token_algorithm)
+
+    def dec(self, token=None):
+        if not token:
+            token = self.m_token
+        return jwt.decode(jwt=token, key=self.m_token_key, algorithms=self.m_token_algorithm)
 
 
 token = CToken()
 
 
-def encode(payload: dict, key=None, algorithm=None) -> str:
-    if not key:
-        key = token.m_token_key
-    if not algorithm:
-        algorithm = token.m_token_algorithm
-
-    return jwt.encode(payload, key, algorithm).decode('utf8')
+def main():
+    token.m_token = token.enc('123')
+    print(token.m_token)
+    print(token.dec())
 
 
-def decode(encoded, key=None, algorithm=None) -> dict:
-    if not key:
-        key = token.m_token_key
-    if not algorithm:
-        algorithm = token.m_token_algorithm
-
-    return jwt.decode(encoded, key, algorithm)
+if __name__ == '__main__':
+    main()

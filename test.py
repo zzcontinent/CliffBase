@@ -8,14 +8,17 @@ def main():
 
     db = CDB()
 
-    print(loop.run_until_complete(db.init()))
+    # print(loop.run_until_complete(db.init()))
 
-    res = loop.run_until_complete(db.get_db_info_by_name('local_ods_jff'))
+    res = db.get_db_info_by_name('local_ods_jff')
     print(loop.run_until_complete(db.select_one(query='select * from wx_user', args=None,
                                                 db_info=res)))
 
-    loop.close()
-    print()
+    # loop.close()
+
+    # token.m_token = token.enc('123')
+    # print(token.m_token)
+    # print(token.dec())
 
 
 if __name__ == '__main__':

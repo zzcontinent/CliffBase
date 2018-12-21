@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 import aiomysql
+import asyncio
 from utils.enc_dec import dec, enc
 from sshtunnel import SSHTunnelForwarder
 from utils.log import debug_log, error_log, info_log
 import pandas as pd
 
 
+# 连接数据库配置信息
 class CDBBaseInfo:
     def __init__(self):
         # db_config连接信息
@@ -29,18 +31,17 @@ class CDBBaseInfo:
         self.m_ssh_passwd = ''
 
 
-DBBaseInfo = CDBBaseInfo()
+_DBBaseInfo = CDBBaseInfo()
 
 
 class CDB:
-    def __init__(self):
+    def __init__(self, db_base_info=_DBBaseInfo):
         self.m_db_pool = {}
         self.m_db_conn_name_dict = {}
         self.m_sshtunnel = dict()
         self.m_df_db_config = pd.DataFrame()
-
-    async def init(self):
-        await self._init_df_db_config()
+        self.m_db_base_info = db_base_info
+        asyncio.get_event_loop().run_until_complete(self._init_df_db_config())
 
     async def _init_df_db_config(self):
         query = 'select * from db_config where is_enabled = 1 and is_display=1'
@@ -63,7 +64,7 @@ class CDB:
                          'charset': row['charset']},
                         ignore_index=True)
 
-    async def close_conn(self):
+    def close_conn(self):
         for k in self.m_db_pool.keys():
             self.m_db_pool[k].close()
         for k in self.m_sshtunnel.keys():
@@ -73,9 +74,9 @@ class CDB:
             self.m_sshtunnel = dict()
         debug_log('close_conn' + '*' * 20)
 
-    async def get_db_info_by_name(self, conn_name):
-        if conn_name == DBBaseInfo.m_conn_pk_name:
-            return await self._create_db_pool()
+    def get_db_info_by_name(self, conn_name):
+        if conn_name == self.m_db_base_info.m_conn_pk_name:
+            return self.m_db_base_info
         else:
             df_one = self.m_df_db_config[self.m_df_db_config['conn_name'] == conn_name]
             db_info = CDBBaseInfo()
@@ -101,7 +102,9 @@ class CDB:
                 error_log('no connect name ' + conn_name)
                 return None
 
-    async def _create_db_pool(self, db_info=DBBaseInfo, loop=None):
+    async def _create_db_pool(self, db_info=None, loop=None):
+        if db_info is None:
+            db_info = self.m_db_base_info
         if db_info.m_conn_pk_name not in self.m_db_pool:
             # 如果是数据库连接  不需要ssh
             if db_info.m_ssh_need == 0:
@@ -157,7 +160,9 @@ class CDB:
 
         return self.m_db_pool[db_info.m_conn_pk_name]
 
-    async def select(self, query, args=None, size=None, db_info=DBBaseInfo):
+    async def select(self, query, args=None, size=None, db_info=None):
+        if db_info is None:
+            db_info = self.m_db_base_info
         pool = await self._create_db_pool(db_info)
         async with pool.acquire() as conn:
             async with conn.cursor() as cursor:
@@ -169,7 +174,9 @@ class CDB:
                 rowcount = cursor.rowcount
                 return result, rowcount
 
-    async def select_one(self, query, args=None, db_info=DBBaseInfo):
+    async def select_one(self, query, args=None, db_info=None):
+        if db_info is None:
+            db_info = self.m_db_base_info
         pool = await self._create_db_pool(db_info)
         async with pool.acquire() as conn:
             async with conn.cursor() as cursor:
@@ -178,21 +185,27 @@ class CDB:
                 rowcount = cursor.rowcount
                 return result, rowcount
 
-    async def insert(self, query, args=None, db_info=DBBaseInfo):
+    async def insert(self, query, args=None, db_info=None):
+        if db_info is None:
+            db_info = self.m_db_base_info
         pool = await self._create_db_pool(db_info)
         async with pool.acquire() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute(query, args)
             return cursor.rowcount, cursor.lastrowid
 
-    async def insert_many(self, query, args=None, db_info=DBBaseInfo):
+    async def insert_many(self, query, args=None, db_info=None):
+        if db_info is None:
+            db_info = self.m_db_base_info
         pool = await self._create_db_pool(db_info)
         async with pool.acquire() as conn:
             async with conn.cursor() as cursor:
                 await cursor.executemany(query, args)
             return cursor.rowcount
 
-    async def update(self, query, args=None, db_info=DBBaseInfo):
+    async def update(self, query, args=None, db_info=None):
+        if db_info is None:
+            db_info = self.m_db_base_info
         pool = await self._create_db_pool(db_info)
         async with pool.acquire() as conn:
             async with conn.cursor() as cursor:
@@ -200,7 +213,9 @@ class CDB:
                 affected_rows = cursor.rowcount
             return affected_rows
 
-    async def execute_many(self, query_list, args_list, db_info=DBBaseInfo):
+    async def execute_many(self, query_list, args_list, db_info=None):
+        if db_info is None:
+            db_info = self.m_db_base_info
         pool = await self._create_db_pool(db_info)
         async with pool.acquire() as conn:
             i = 0
@@ -210,3 +225,6 @@ class CDB:
                     i += 1
                 affected_rows = cursor.rowcounts
             return affected_rows
+
+
+GloabalDB = CDB()
