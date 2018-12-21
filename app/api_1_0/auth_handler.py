@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from utils.db import Db
+from utils.db import CDB
 from ..request_handler import BaseRequestHandler
 from ..log import debug_log
 from schema import Schema

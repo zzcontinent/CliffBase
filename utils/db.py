@@ -1,394 +1,212 @@
 # -*- coding: utf-8 -*-
 import aiomysql
-from utils.config import config
-from utils.enc_dec import dec
-from app.exceptions import *
+from utils.enc_dec import dec, enc
 from sshtunnel import SSHTunnelForwarder
-import threading
 from utils.log import debug_log, error_log, info_log
+import pandas as pd
 
-default_db_conn_name = '_default_mysql_db_conn__'
+
+class CDBBaseInfo:
+    def __init__(self):
+        # db_config连接信息
+        self.m_conn_type = 0
+        self.m_conn_pk_name = 'db_config'
+        self.m_db_host = '127.0.0.1'
+        self.m_db_port = 3306
+        self.m_db_user = 'root'
+        self.m_db_passwd = '123456'
+        self.m_db_name = 'metadata'
+        self.m_charset = 'utf8mb4'
+        self.m_db_pool_minsize = 1
+        self.m_db_pool_maxsize = 50
+        self.m_db_connect_timeout = 5
+        self.m_pool_recycle = 6 * 60 * 60
+        # 是否需要ssh
+        self.m_ssh_need = 0
+        self.m_ssh_host = ''
+        self.m_ssh_user = ''
+        self.m_ssh_port = 0
+        self.m_ssh_passwd = ''
 
 
-class Db:
-    """Db sql execute using aiomysql pool."""
-    __db_pool = {}
-    __db_conn_name_dict = {}
-    __sshtunnel = dict()
-    __pool_recycle = 60 * 60 * 1
+DBBaseInfo = CDBBaseInfo()
 
-    @staticmethod
-    def close_conn():
+
+class CDB:
+    def __init__(self):
+        self.m_db_pool = {}
+        self.m_db_conn_name_dict = {}
+        self.m_sshtunnel = dict()
+        self.m_df_db_config = pd.DataFrame()
+
+    async def init(self):
+        await self._init_df_db_config()
+
+    async def _init_df_db_config(self):
+        query = 'select * from db_config where is_enabled = 1 and is_display=1'
+        base_db_pool = await self._create_db_pool()
+        async with base_db_pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(query)
+                result = await cursor.fetchall()
+                for row in result:
+                    self.m_df_db_config = self.m_df_db_config.append(
+                        {'db_config_id': row['db_config_id'],
+                         'conn_name': row['conn_name'],
+                         'user': row['user'],
+                         'passwd': row['passwd'],
+                         'host': row['host'],
+                         'port': row['port'],
+                         'db_name': row['db_name'],
+                         'ssh_sts': row['ssh_sts'],
+                         'ssh_sk': row['ssh_sk'],
+                         'charset': row['charset']},
+                        ignore_index=True)
+
+    async def close_conn(self):
+        for k in self.m_db_pool.keys():
+            self.m_db_pool[k].close()
+        for k in self.m_sshtunnel.keys():
+            self.m_sshtunnel[k].stop()
+            self.m_db_conn_name_dict = dict()
+            self.m_db_pool = dict()
+            self.m_sshtunnel = dict()
         debug_log('close_conn' + '*' * 20)
-        debug_log(Db.__db_conn_name_dict)
-        debug_log(Db.__db_pool)
-        debug_log(Db.__sshtunnel)
 
-        for k in Db.__db_pool.keys():
-            Db.__db_pool[k].close()
-
-        for k in Db.__sshtunnel.keys():
-            Db.__sshtunnel[k].stop()
-
-        Db.__db_conn_name_dict = dict()
-        Db.__db_pool = dict()
-        Db.__sshtunnel = dict()
-
-    @staticmethod
-    async def create_db_pool(db_conn_name=default_db_conn_name, loop=None):
-        if db_conn_name in Db.__db_pool:
-            return Db.__db_pool[db_conn_name]
-
-        if db_conn_name == default_db_conn_name:
-            if config.ssh_need != 1:
-                Db.__db_pool[db_conn_name] = await aiomysql.create_pool(
-                    host=config.db_host,
-                    port=config.db_port,
-                    user=config.db_user,
-                    password=dec(config.db_password),
-                    db=config.db_schema,
-                    charset='utf8mb4',
-                    cursorclass=aiomysql.DictCursor,
-                    autocommit=False,
-                    minsize=config.db_pool_minsize,
-                    maxsize=config.db_pool_maxsize,
-                    connect_timeout=config.db_connect_timeout,
-                    loop=loop,
-                    # pool_recycle=Db.__pool_recycle
-                )
-                debug_log(u'新增连接' + '*' * 20)
-                debug_log(db_conn_name)
-            elif config.ssh_need == 1:
-                ssh_conn_name = config.ssh_host + ':' + str(config.ssh_port)
-                if ssh_conn_name not in Db.__sshtunnel:
-                    server = SSHTunnelForwarder(
-                        (config.ssh_host, int(config.ssh_port)),  # ssh机的配置
-                        ssh_password=dec(config.ssh_passwd),
-                        ssh_username=config.ssh_user,
-                        remote_bind_address=(config.db_host, int(config.db_port)))  # 目标机的配置
-                    # 开启ssh端口映射通道
-                    server.start()
-                    Db.__sshtunnel[ssh_conn_name] = server
-                    debug_log('新增ssh tunnel' + '*' * 20)
-                    debug_log(ssh_conn_name, server)
-                Db.__db_pool[db_conn_name] = await aiomysql.create_pool(
-                    host='127.0.0.1',
-                    port=Db.__sshtunnel[ssh_conn_name].local_bind_port,
-                    user=config.db_user,
-                    password=dec(config.db_password),
-                    db=config.db_schema,
-                    charset='utf8mb4',
-                    cursorclass=aiomysql.DictCursor,
-                    autocommit=False,
-                    minsize=config.db_pool_minsize,
-                    maxsize=config.db_pool_maxsize,
-                    connect_timeout=config.db_connect_timeout,
-                    loop=loop,
-                    # pool_recycle=Db.__pool_recycle
-                )
-                debug_log(u'新增连接' + '*' * 20)
-                debug_log(db_conn_name)
+    async def get_db_info_by_name(self, conn_name):
+        if conn_name == DBBaseInfo.m_conn_pk_name:
+            return await self._create_db_pool()
         else:
-            row, _ = await Db.select_one(
-                '''SELECT * FROM `db_config` where is_enabled=1 and conn_name ='{0}' and is_display=1 '''.format(
-                    db_conn_name))
-            if not row:
-                raise NoDBConnectConfigException
+            df_one = self.m_df_db_config[self.m_df_db_config['conn_name'] == conn_name]
+            db_info = CDBBaseInfo()
+            if len(df_one) > 0:
+                for _, row in df_one.iterrows():
+                    db_info.m_conn_pk_name = row['conn_name']
+                    db_info.m_charset = row['charset']
+                    db_info.m_db_host = row['host']
+                    db_info.m_db_port = row['port']
+                    db_info.m_db_user = row['user']
+                    db_info.m_db_name = row['db_name']
+                    db_info.m_db_passwd = dec(row['passwd'])
+                    if int(row['ssh_sts']) > 0:
+                        df_ssh = self.m_df_db_config[self.m_df_db_config['db_config_id'] == row['ssh_sk']]
+                        for row_ssh in df_ssh:
+                            db_info.m_ssh_user = row_ssh['user']
+                            db_info.m_ssh_host = row_ssh['host']
+                            db_info.m_ssh_port = row_ssh['port']
+                            db_info.m_ssh_passwd = dec(row_ssh['passwd'])
+                            db_info.m_ssh_need = 1
+                    return db_info
+            else:
+                error_log('no connect name ' + conn_name)
+                return None
 
-            conn_type = row['conn_type']
-            ssh_sts = row['ssh_sts']
-            ssh_sk = row['ssh_sk']
-            env = row['env']
-            conn_name = row['conn_name']
-            user = row['user']
-            passwd = dec(row['passwd'])
-            host = row['host']
-            port = int(row['port'])
-            db_name = row['db_name']
-            charset = row['charset']
-
+    async def _create_db_pool(self, db_info=DBBaseInfo, loop=None):
+        if db_info.m_conn_pk_name not in self.m_db_pool:
             # 如果是数据库连接  不需要ssh
-            if conn_type == 0 and ssh_sts == 0:
-                Db.__db_pool[db_conn_name] = await aiomysql.create_pool(
-                    host=row['host'],
-                    port=int(row['port']),
-                    user=row['user'],
-                    password=dec(row['passwd']),
-                    db=row['db_name'],
-                    charset='utf8mb4',
+            if db_info.m_ssh_need == 0:
+                self.m_db_pool[db_info.m_conn_pk_name] = await aiomysql.create_pool(
+                    host=db_info.m_db_host,
+                    port=int(db_info.m_db_port),
+                    user=db_info.m_db_user,
+                    password=db_info.m_db_passwd,
+                    db=db_info.m_db_name,
+                    charset=db_info.m_charset,
                     cursorclass=aiomysql.DictCursor,
-                    autocommit=False,
-                    minsize=config.db_pool_minsize,
-                    maxsize=config.db_pool_maxsize,
-                    connect_timeout=config.db_connect_timeout,
+                    autocommit=True,
+                    minsize=db_info.m_db_pool_minsize,
+                    maxsize=db_info.m_db_pool_maxsize,
+                    connect_timeout=db_info.m_db_connect_timeout,
                     loop=loop,
-                    # pool_recycle=Db.__pool_recycle
+                    pool_recycle=db_info.m_pool_recycle
                 )
                 debug_log(u'新增连接' + '*' * 20)
-                debug_log(db_conn_name)
-            elif conn_type == 0 and ssh_sts == 1:
-                rowSSh, _ = await Db.select_one(
-                    '''SELECT * FROM `db_config` where is_enabled=1 and db_config_id={0} '''.format(ssh_sk))
-
-                ssh_conn_name = rowSSh['host'] + ':' + str(rowSSh['port'])
-                if ssh_conn_name not in Db.__sshtunnel:
+                debug_log(db_info.m_conn_pk_name)
+            elif db_info.m_ssh_need == 1:
+                ssh_conn_pk_name = db_info.m_ssh_host + ':' + str(db_info.m_ssh_port)
+                if ssh_conn_pk_name not in self.m_sshtunnel:
                     server = SSHTunnelForwarder(
-                        (rowSSh['host'], int(rowSSh['port'])),  # ssh机的配置
-                        ssh_password=dec(rowSSh['passwd']),
-                        ssh_username=rowSSh['user'],
-                        remote_bind_address=(row['host'], int(row['port'])))  # 目标机的配置
+                        (db_info.m_ssh_host, int(db_info.m_ssh_port)),  # ssh机的配置
+                        ssh_password=db_info.m_ssh_passwd,
+                        ssh_username=db_info.m_ssh_user,
+                        remote_bind_address=(db_info.m_db_host, int(db_info.m_db_port)))  # 目标机的配置
                     # 开启ssh端口映射通道
                     server.start()
-                    Db.__sshtunnel[ssh_conn_name] = server
+                    self.m_sshtunnel[ssh_conn_pk_name] = server
                     debug_log(u'新增ssh tunnel' + '*' * 20)
-                    debug_log(ssh_conn_name, server)
-                Db.__db_pool[db_conn_name] = await aiomysql.create_pool(
-                    host='127.0.0.1',
-                    port=Db.__sshtunnel[ssh_conn_name].local_bind_port,
-                    user=user,
-                    password=dec(row['passwd']),
-                    db=db_name,
-                    charset='utf8mb4',
+                    debug_log(ssh_conn_pk_name)
+
+                # 创建带ssh的连接
+                self.m_db_pool[db_info.m_conn_pk_name] = await aiomysql.create_pool(
+                    host=self.m_sshtunnel[ssh_conn_pk_name].local_bind_host,
+                    port=self.m_sshtunnel[ssh_conn_pk_name].local_bind_port,
+                    user=db_info.m_db_user,
+                    password=db_info.m_db_passwd,
+                    db=db_info.m_db_name,
+                    charset=db_info.m_charset,
                     cursorclass=aiomysql.DictCursor,
-                    autocommit=False,
-                    minsize=config.db_pool_minsize,
-                    maxsize=config.db_pool_maxsize,
-                    connect_timeout=config.db_connect_timeout,
+                    autocommit=True,
+                    minsize=db_info.m_db_pool_minsize,
+                    maxsize=db_info.m_db_pool_maxsize,
+                    connect_timeout=db_info.m_db_connect_timeout,
                     loop=loop,
-                    # pool_recycle=Db.__pool_recycle
+                    pool_recycle=db_info.m_pool_recycle
                 )
                 debug_log(u'新增连接' + '*' * 20)
-                debug_log(db_conn_name)
+                debug_log(db_info.m_conn_pk_name)
 
-        return Db.__db_pool[db_conn_name]
+        return self.m_db_pool[db_info.m_conn_pk_name]
 
-    @staticmethod
-    async def get_db_pool(db_conn_name=default_db_conn_name):
-        if db_conn_name not in Db.__db_pool:
-            return await Db.create_db_pool(db_conn_name)
-        else:
-            return Db.__db_pool[db_conn_name]
-
-    @staticmethod
-    async def get_db_name_by_conn(db_conn_name):
-        if not db_conn_name:
-            return ''
-
-        if db_conn_name in Db.__db_conn_name_dict:
-            return Db.__db_conn_name_dict[db_conn_name]
-
-        row, _ = await Db.select_one(
-            "select db_name from db_config "
-            "where conn_name=%s and conn_type=0 and is_enabled=1 and is_display=1",
-            db_conn_name
-        )
-        if not row:
-            raise NoDBConnectConfigException
-
-        Db.__db_conn_name_dict[db_conn_name] = row['db_name']
-        return Db.__db_conn_name_dict[db_conn_name]
-
-    @staticmethod
-    async def select(query, args=None, size=None, db_conn_name=default_db_conn_name):
-        """Executes the given select operation
-
-        Executes the given select operation substituting any markers with
-        the given parameters.
-
-        For example, getting all rows where id is 5:
-          Db.select("SELECT * FROM t1 WHERE id = %s", (5,))
-
-        :param query: ``str`` sql statement
-        :param args: ``tuple`` or ``list`` of arguments for sql query
-        :param size: ``int`` or None, size rows returned
-        :param db_conn_name: ``str`` db conn name
-        :returns: ``list``
-        """
-        try:
-            pool = await Db.get_db_pool(db_conn_name)
-            async with pool.acquire() as conn:
-                async with conn.cursor() as cursor:
-                    await cursor.execute(query, args)
-                    if size is None:
-                        result = await cursor.fetchall()
-                    else:
-                        result = await cursor.fetchmany(size)
-                    rowcount = cursor.rowcount
-                    return result, rowcount
-        except Exception as e:
-            if e.args[0] == 2003:
-                raise DBConnFaild
-            elif type(args) is list:
-                args = tuple(args)
-                error_log("db select errror [%s]: %s", query % args, e)
-                raise
-
-    @staticmethod
-    async def select_one(query, args=None, db_conn_name=default_db_conn_name):
-        """Executes the given select operation, but only fetch one row.
-
-        Executes the given select operation substituting any markers with
-        the given parameters.
-
-        For example, getting one row where id is 5:
-          Db.select_one("SELECT * FROM t1 WHERE id = %s limit 1", (5,))
-
-        :param query: ``str`` sql statement
-        :param args: ``tuple`` or ``list`` of arguments for sql query
-        :param db_conn_name: ``str`` db conn name
-        :returns: ``dict``
-        """
-        try:
-            pool = await Db.get_db_pool(db_conn_name)
-            async with pool.acquire() as conn:
-                async with conn.cursor() as cursor:
-                    await cursor.execute(query, args)
-                    result = await cursor.fetchone()
-                    rowcount = cursor.rowcount
-                    return result, rowcount
-        except Exception as e:
-            if e.args[0] == 2003:
-                raise DBConnFaild
-            if type(args) is list:
-                args = tuple(args)
-                error_log("db select one errror [%s]: %s", query % args, e)
-                raise
-
-    @staticmethod
-    async def insert(query, args=None, db_conn_name=default_db_conn_name):
-        """Executes the given insert operation
-
-        Executes the given insert operation substituting any markers with
-        the given parameters.
-
-        For example, insert table t1 one row:
-          Db.insert("insert into t1(id, name) values (%s, %s)", (5, 'Jack'))
-
-        :param query: ``str`` sql statement
-        :param args: ``tuple`` or ``list`` of arguments for sql query
-        :param db_conn_name: ``str`` db conn name
-        :returns: ``int``, number of rows that has been produced of affected
-        """
-        pool = await Db.get_db_pool(db_conn_name)
+    async def select(self, query, args=None, size=None, db_info=DBBaseInfo):
+        pool = await self._create_db_pool(db_info)
         async with pool.acquire() as conn:
-            try:
-                async with conn.cursor() as cursor:
-                    await cursor.execute(query, args)
-                    affected_rows = cursor.rowcount
-                    lastrowid = cursor.lastrowid
-                await conn.commit()
-                return affected_rows, lastrowid
-            except Exception as e:
-                await conn.rollback()
-                if e.args[0] == 2003:
-                    raise DBConnFaild
-                if type(args) is list:
-                    args = tuple(args)
-                error_log("db insert errror [%s]: %s", query % args, e)
-                raise
-
-    @staticmethod
-    async def insert_many(query, args=None, db_conn_name=default_db_conn_name):
-        """Executes the given insert operation
-
-        Executes the given insert operation substituting any markers with
-        the given parameters.
-
-        For example, insert table t1 many rows:
-          Db.insert_many("insert into t1(id, name) values (%s, %s)", [(5, 'Jack'), (6,'Tom')])
-
-        :param query: ``str`` sql statement
-        :param args: ``tuple`` or ``list`` of arguments for sql query
-        :param db_conn_name: ``str`` db conn name
-        :returns: ``int``, number of rows that has been produced of affected
-        """
-        pool = await Db.get_db_pool(db_conn_name)
-        async with pool.acquire() as conn:
-            try:
-                async with conn.cursor() as cursor:
-                    await cursor.executemany(query, args)
-                    affected_rows = cursor.rowcount
-                await conn.commit()
-                return affected_rows
-            except Exception as e:
-                await conn.rollback()
-                if e.args[0] == 2003:
-                    raise DBConnFaild
+            async with conn.cursor() as cursor:
+                await cursor.execute(query, args)
+                if size is None:
+                    result = await cursor.fetchall()
                 else:
-                    error_log("db insert many errror [%s]: %s", query % list(args), e)
-                    raise
+                    result = await cursor.fetchmany(size)
+                rowcount = cursor.rowcount
+                return result, rowcount
 
-    @staticmethod
-    async def update(query, args=None, db_conn_name=default_db_conn_name):
-        """Executes the given update operation
-
-        Executes the given update operation substituting any markers with
-        the given parameters.
-
-        For example, update table t1 where id is 5:
-          Db.update("update t1 set name=%s where id=%s", ('Jack', 5))
-
-        :param query: ``str`` sql statement
-        :param args: ``tuple`` or ``list`` of arguments for sql query
-        :param db_conn_name: ``str`` db conn name
-        :returns: ``int``, number of rows that has been produced of affected
-        """
-        pool = await Db.get_db_pool(db_conn_name)
+    async def select_one(self, query, args=None, db_info=DBBaseInfo):
+        pool = await self._create_db_pool(db_info)
         async with pool.acquire() as conn:
-            try:
-                async with conn.cursor() as cursor:
-                    await cursor.execute(query, args)
-                    affected_rows = cursor.rowcount
-                await conn.commit()
-                return affected_rows
-            except Exception as e:
-                await conn.rollback()
-                if e.args[0] == 2003:
-                    raise DBConnFaild
-                if type(args) is list:
-                    args = tuple(args)
-                    error_log("db update errror [%s]: %s", query % args, e)
-                    raise
+            async with conn.cursor() as cursor:
+                await cursor.execute(query, args)
+                result = await cursor.fetchone()
+                rowcount = cursor.rowcount
+                return result, rowcount
 
-    @staticmethod
-    async def execute_many(query_list, args_list, db_conn_name=default_db_conn_name):
-        """Executes the given dml operations
+    async def insert(self, query, args=None, db_info=DBBaseInfo):
+        pool = await self._create_db_pool(db_info)
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(query, args)
+            return cursor.rowcount, cursor.lastrowid
 
-        Executes the given dml operations substituting any markers with
-        the given parameters.
+    async def insert_many(self, query, args=None, db_info=DBBaseInfo):
+        pool = await self._create_db_pool(db_info)
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.executemany(query, args)
+            return cursor.rowcount
 
-        For example, insert table t1 many rows:
-          Db.insert_many("insert into t1(id, name) values (%s, %s)", [(5, 'Jack'), (6,'Tom')])
+    async def update(self, query, args=None, db_info=DBBaseInfo):
+        pool = await self._create_db_pool(db_info)
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(query, args)
+                affected_rows = cursor.rowcount
+            return affected_rows
 
-        :param query_list: ``list`` sql statement list
-        :param args_list: ``list`` of arguments for sql query
-        :param db_conn_name: ``str`` db conn name
-        :returns: ``int``, number of rows that has been produced of affected
-        """
-        pool = await Db.get_db_pool(db_conn_name)
+    async def execute_many(self, query_list, args_list, db_info=DBBaseInfo):
+        pool = await self._create_db_pool(db_info)
         async with pool.acquire() as conn:
             i = 0
-            try:
-                async with conn.cursor() as cursor:
-                    for query, args in zip(query_list, args_list):
-                        await cursor.execute(query, args)
-                        i += 1
-                    affected_rows = cursor.rowcount
-                await conn.commit()
-                return affected_rows
-            except Exception as e:
-                await conn.rollback()
-                if e.args[0] == 2003:
-                    raise DBConnFaild
-                error_log("db execute many errror [%s]: %s", query_list[i] % list(args_list[i]), e)
-                raise
-
-    @staticmethod
-    def time_task():
-        Db.close_conn()
-        timer = threading.Timer(60 * 60 * 5.5, Db.time_task)
-        timer.start()
-
-
-# 5.5h 清空连接
-Db.time_task()
+            async with conn.cursor() as cursor:
+                for query, args in zip(query_list, args_list):
+                    await cursor.execute(query, args)
+                    i += 1
+                affected_rows = cursor.rowcounts
+            return affected_rows
