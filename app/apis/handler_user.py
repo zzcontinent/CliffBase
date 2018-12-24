@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 
-from app.apis.filter_request_handler import CFilterRequestHandler
-from app.route import route
-from utils.db import GloabalDB
+from app.apis.handler_filter import CFilterRequestHandler
+from utils.route import route
 
 
 @route('/user/([0-9]+)')

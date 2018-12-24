@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    {% block page_title %}{% end %}
+    <link href="{{static_url('plugins/bootstrap/css/bootstrap.min.css')}}" rel="stylesheet">
+    {% block css_files %}{% end %}
+</head>
+<body>
+<div class="container">
+    <div class="top-bar">
+        {% block header %}{% end %}
+    </div>
+    {% block body %}{% end %}
+    <div class="footer">
+        {% block footer %}{% end %}
+    </div>
+</div>
+<script src="{{static_url('js/jquery.min.js')}}"></script>
+<script src="{{static_url('plugins/bootstrap/js/bootstrap.min.js')}}"></script>
+{% block js_files %}{% end %}
+</body>
+</html>

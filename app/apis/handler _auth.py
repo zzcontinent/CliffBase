@@ -1,16 +1,7 @@
 # -*- coding: utf-8 -*-
-from app.apis.filter_request_handler import CFilterRequestHandler
-from utils.log import debug_log
-from schema import Schema
+from app.apis.handler_filter import CFilterRequestHandler
 import concurrent.futures
-import bcrypt
-import tornado
-import tornado.escape
-import tornado.web
-import asyncio
-import datetime
-import time
-from app.route import route
+from utils.route import route
 
 # A thread pool to be used for password hashing with bcrypt.
 executor = concurrent.futures.ThreadPoolExecutor(2)

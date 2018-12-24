@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import platform
 import yaml
+import os
 
 
 def get_system_platform():
@@ -20,4 +21,3 @@ def read_yaml(file_path):
 
 
 yaml_dict = read_yaml(get_config_path())
-
